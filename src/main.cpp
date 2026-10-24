@@ -13,10 +13,19 @@
 const char* WIFI_SSID = "LANGA";
 const char* WIFI_PASS = "12345678";
 
-// Chave da API do Gemini inserida e pronta a usar!
-const char* GEMINI_API_KEY   = "AQ.Ab8RN6IHnIPnvblf0lPSnEJBgpH8C9wOsELarpF_niyO060a6g"; 
-const char* GEMINI_HOST      = "generativelanguage.googleapis.com";
-const char* GEMINI_MODEL     = "gemini-2.5-flash";
+// --- Blindagem para o IntelliSense e Segurança do GitHub ---
+// Se a chave não vier injetada pelo platformio.ini (durante edição no VS Code),
+// o IntelliSense assume um valor temporário para não dar erro na tela.
+#ifndef GEMINI_API_KEY
+#define GEMINI_API_KEY "CHAVE_PLACEHOLDER_PLATFORMIO"
+#endif
+
+#define STRINGIFY2(x) #x
+#define STRINGIFY(x) STRINGIFY2(x)
+
+const char* GEMINI_API_KEY_VAL = STRINGIFY(GEMINI_API_KEY);
+const char* GEMINI_HOST        = "generativelanguage.googleapis.com";
+const char* GEMINI_MODEL       = "gemini-2.5-flash";
 
 // --- Pinos (ESP32 WROOM + INMP441) ---
 #define MIC_PORT  I2S_NUM_0
@@ -257,7 +266,7 @@ bool askGemini(String& fala) {
     return false;
   }
 
-  String path = String("/v1beta/models/") + GEMINI_MODEL + ":generateContent?key=" + String(GEMINI_API_KEY);
+  String path = String("/v1beta/models/") + GEMINI_MODEL + ":generateContent?key=" + String(GEMINI_API_KEY_VAL);
   
   client.printf("POST %s HTTP/1.1\r\n", path.c_str());
   client.printf("Host: %s\r\n", GEMINI_HOST);
@@ -274,7 +283,7 @@ bool askGemini(String& fala) {
   
   String response = "";
   bool headersPassed = false;
-  while (client.available() || client.connected()) {
+  while (client.available() && client.connected()) {
     String line = client.readStringUntil('\n');
     if (line == "\r") headersPassed = true;
     else if (headersPassed) response += line;
