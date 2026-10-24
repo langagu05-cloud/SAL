@@ -13,7 +13,7 @@
 const char* WIFI_SSID = "LANGA";
 const char* WIFI_PASS = "12345678";
 
-// Chave da API do Gemini inserida diretamente
+// Chave da API do Gemini inserida diretamente para testes locais
 const char* GEMINI_API_KEY   = "AQ.Ab8RN6IHnIPnvblf0lPSnEJBgpH8C9wOsELarpF_niyO060a6g"; 
 const char* GEMINI_HOST      = "generativelanguage.googleapis.com";
 const char* GEMINI_MODEL     = "gemini-2.5-flash";
@@ -63,14 +63,16 @@ void wifiEnsure() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.println("\n==================================================");
-  Serial.print("[WiFi] TESTANDO NO CELULAR (HOTSPOT): ");
+  Serial.print("[WiFi] A CONECTAR AO HOTSPOT: ");
   Serial.println(WIFI_SSID);
   
+  // Desliga completamente e limpa qualquer estado anterior do rádio
+  WiFi.persistent(false);
   WiFi.disconnect(true);
-  delay(1000);
+  delay(1500);
   
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
+  WiFi.setSleep(false); // Desativa poupança de energia para manter o rádio firme
   
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
@@ -78,13 +80,14 @@ void wifiEnsure() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    if (millis() - tStart > 20000) {
-      Serial.println("\n[ERRO CRITICO] Timeout. Reiniciando...");
+    // Margem de 30 segundos para dar folga ao telemóvel responder
+    if (millis() - tStart > 30000) {
+      Serial.println("\n[ERRO CRITICO] Timeout no Wi-Fi. A reiniciar ESP32...");
       ESP.restart();
     }
   }
 
-  Serial.print("\n[WiFi] CONECTADO AO CELULAR COM SUCESSO! IP: ");
+  Serial.print("\n[WiFi] CONECTADO COM SUCESSO! IP: ");
   Serial.println(WiFi.localIP());
   Serial.println("==================================================");
   
