@@ -5,6 +5,7 @@
 #include <driver/i2s.h>
 #include "mbedtls/base64.h"
 #include <time.h>
+#include <esp_wifi.h> // Necessário para configurações avançadas do rádio
 
 // ============================================================================
 // CONFIGURAÇÃO DE REDE E API
@@ -12,16 +13,12 @@
 const char* WIFI_SSID = "VIVOFIBRA-6561";
 const char* WIFI_PASS = "ppUb6qmc9Q";
 
-// ATENÇÃO: Insere aqui a tua chave da API do Gemini real para o ESP32 funcionar
+// ATENÇÃO: Insere aqui a tua chave da API do Gemini
 const char* GEMINI_API_KEY   = "SUA_CHAVE_API_AQUI"; 
 const char* GEMINI_HOST      = "generativelanguage.googleapis.com";
 const char* GEMINI_MODEL     = "gemini-2.5-flash";
 
 // --- Pinos (ESP32 WROOM + INMP441) ---
-// SCK -> GPIO 14
-// WS  -> GPIO 15
-// SD  -> GPIO 32
-// L/R -> GND (Canal Esquerdo)
 #define MIC_PORT  I2S_NUM_0
 #define MIC_SCK   14
 #define MIC_WS    15
@@ -43,11 +40,21 @@ uint8_t* audioBuf = NULL;
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE E HORAS (COM TRATAMENTO DE ERRO BLINDADO)
+// REDE SUPER AVANÇADA (BSSID LOCK + NO SLEEP)
 // ============================================================================
+// Endereço físico (MAC) EXATO da tua rede VIVOFIBRA-6561 (Canal 1) pego no teu CMD
+const uint8_t bssidVivo[] = {0x98, 0x7E, 0xCA, 0x91, 0x65, 0x6F};
+
+// Rastreador de erros do roteador (Mostra o motivo exato se a Vivo derrubar a conexão)
+void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+        Serial.printf("\n[ALERTA VIVO] O Roteador cortou a conexao! Motivo (Reason Code): %d\n", info.wifi_sta_disconnected.reason);
+    }
+}
+
 void syncTime() {
   configTime(-10800, 0, "pool.ntp.org", "time.nist.gov");
-  Serial.print("[INFO] Sincronizando relógio NTP...");
+  Serial.print("[INFO] Sincronizando relogio NTP...");
   struct tm timeinfo;
   int tentativas = 0;
   while (!getLocalTime(&timeinfo) && tentativas < 10) {
@@ -56,7 +63,7 @@ void syncTime() {
     tentativas++;
   }
   if (tentativas < 10) {
-    Serial.println("\n[INFO] Relógio sincronizado com sucesso!");
+    Serial.println("\n[INFO] Relogio sincronizado com sucesso!");
   } else {
     Serial.println("\n[AVISO] Falha ao sincronizar hora, mas continuando...");
   }
@@ -65,30 +72,41 @@ void syncTime() {
 void wifiEnsure() {
   if (WiFi.status() == WL_CONNECTED) return;
 
-  Serial.print("\n[WiFi] Conectando a ");
+  Serial.println("\n==================================================");
+  Serial.print("[WiFi] Iniciando MODO SNIPER (BSSID Lock) para: ");
   Serial.println(WIFI_SSID);
-
-  // Limpeza profunda de cache Wi-Fi para forçar conexão limpa
-  WiFi.persistent(false); 
+  
   WiFi.disconnect(true);
   delay(1000);
   
+  // 1. Registra o monitor de eventos do Wi-Fi
+  WiFi.onEvent(WiFiEvent);
+  
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  // 2. Desativa economia de energia (Impede o roteador da Vivo de desativar o ESP32)
+  WiFi.setSleep(false);
+  
+  // 3. Potência do rádio no Talo (Máximo permitido)
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
+  // 4. CONEXÃO DIRETA HARDWARE-TO-HARDWARE: Ignora scans e ataca direto o MAC do roteador no Canal 1
+  WiFi.begin(WIFI_SSID, WIFI_PASS, 1, bssidVivo);
 
   uint32_t tStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    // Aumentado para 30 segundos para dar margem ao router
-    if (millis() - tStart > 30000) {
-      Serial.println("\n[ERRO] Falha ao conectar. Reiniciando o ESP32...");
+    if (millis() - tStart > 20000) {
+      Serial.println("\n[ERRO CRITICO] Timeout. Reiniciando o tanque...");
       ESP.restart();
     }
   }
 
-  Serial.print("\n[WiFi] Conectado com sucesso! IP: ");
+  Serial.print("\n[WiFi] CONECTADO COMO UM CHEFE! IP: ");
   Serial.println(WiFi.localIP());
+  Serial.println("==================================================");
+  
   syncTime();
 }
 
@@ -245,7 +263,7 @@ bool askGemini(String& fala) {
   String payload = "{\"systemInstruction\":{\"parts\":[{\"text\":\"" + jsonEscape(promptDinamico) + "\"}]},";
   payload += "\"tools\": [{\"googleSearch\": {}}], "; 
   payload += "\"generationConfig\": {\"responseMimeType\": \"application/json\", \"responseSchema\": { \"type\": \"OBJECT\", \"properties\": { \"fala\": {\"type\": \"STRING\"} } }},";
-  payload += "\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Ouve o que o vovô disse:\"},{\"inlineData\":{\"mimeType\":\"audio/wav\",\"data\":\"" + String(b64Buffer) + "\"}}]}]}";
+  payload += "\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Ouve o que o vovo disse:\"},{\"inlineData\":{\"mimeType\":\"audio/wav\",\"data\":\"" + String(b64Buffer) + "\"}}]}]}";
   free(b64Buffer);
 
   Serial.println("[PROCESSANDO] Consultando o Sálvio na nuvem...");
@@ -253,7 +271,7 @@ bool askGemini(String& fala) {
   client.setInsecure();
   
   if (!client.connect(GEMINI_HOST, 443)) {
-    Serial.println("[ERRO] Falha na conexão HTTPS.");
+    Serial.println("[ERRO] Falha na conexao HTTPS.");
     return false;
   }
 
@@ -322,11 +340,11 @@ void loop() {
     if (askGemini(fala)) {
       if (fala.length() > 0) {
         Serial.println("==================================================");
-        Serial.printf("👴💬 SÁLVIO DIZ: \"%s\"\n", fala.c_str());
+        Serial.printf("👴💬 SALVIO DIZ: \"%s\"\n", fala.c_str());
         Serial.println("==================================================");
       }
     } else {
-      Serial.println("[AVISO] Não foi possível processar a fala.");
+      Serial.println("[AVISO] Nao foi possivel processar a fala.");
     }
   }
 }
