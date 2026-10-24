@@ -10,8 +10,8 @@
 // ============================================================================
 // CONFIGURAÇÃO DE REDE E API
 // ============================================================================
-const char* WIFI_SSID = "LANGA";
-const char* WIFI_PASS = "12345678";
+const char* WIFI_SSID = "VIVOFIBRA6561";
+const char* WIFI_PASS = "ppUb6qmc9Q";
 
 // Chave da API do Gemini inserida diretamente para testes locais
 const char* GEMINI_API_KEY   = "AQ.Ab8RN6IHnIPnvblf0lPSnEJBgpH8C9wOsELarpF_niyO060a6g"; 
@@ -40,7 +40,7 @@ uint8_t* audioBuf = NULL;
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE: CONEXÃO LIMPA PARA O CELULAR (HOTSPOT)
+// REDE: CONEXÃO COM A VIVO FIBRA
 // ============================================================================
 void syncTime() {
   configTime(-10800, 0, "pool.ntp.org", "time.nist.gov");
@@ -63,7 +63,7 @@ void wifiEnsure() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.println("\n==================================================");
-  Serial.print("[WiFi] A CONECTAR AO HOTSPOT: ");
+  Serial.print("[WiFi] A CONECTAR A VIVO: ");
   Serial.println(WIFI_SSID);
   
   WiFi.persistent(false);
