@@ -10,11 +10,11 @@
 // ============================================================================
 // CONFIGURAÇÃO DE REDE E API
 // ============================================================================
-const char* WIFI_SSID = "VIVOFIBRA-6561";
-const char* WIFI_PASS = "ppUb6qmc9Q";
+const char* WIFI_SSID = "LANGA";
+const char* WIFI_PASS = "12345678";
 
-// ATENÇÃO: Insere aqui a tua chave da API do Gemini
-const char* GEMINI_API_KEY   = "SUA_CHAVE_API_AQUI"; 
+// Chave da API do Gemini inserida e pronta a usar!
+const char* GEMINI_API_KEY   = "AQ.Ab8RN6IHnIPnvblf0lPSnEJBgpH8C9wOsELarpF_niyO060a6g"; 
 const char* GEMINI_HOST      = "generativelanguage.googleapis.com";
 const char* GEMINI_MODEL     = "gemini-2.5-flash";
 
@@ -40,14 +40,8 @@ uint8_t* audioBuf = NULL;
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE: HACK VIVO FIBRA + ANTI-BROWNOUT
+// REDE: CONEXÃO LIMPA PARA O CELULAR (HOTSPOT)
 // ============================================================================
-void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
-    if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-        Serial.printf("\n[ALERTA VIVO] A Vivo cortou a ligacao! Reason Code: %d\n", info.wifi_sta_disconnected.reason);
-    }
-}
-
 void syncTime() {
   configTime(-10800, 0, "pool.ntp.org", "time.nist.gov");
   Serial.print("[INFO] Sincronizando relogio NTP...");
@@ -69,28 +63,17 @@ void wifiEnsure() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.println("\n==================================================");
-  Serial.print("[WiFi] APLICANDO ANTI-BROWNOUT VIVO FIBRA: ");
+  Serial.print("[WiFi] TESTANDO NO CELULAR (HOTSPOT): ");
   Serial.println(WIFI_SSID);
   
   WiFi.disconnect(true);
   delay(1000);
   
-  WiFi.onEvent(WiFiEvent);
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false); // Mantém o rádio sempre acordado
   
-  // 1. Nomeia o dispositivo para furar o DHCP
-  WiFi.setHostname("SalvioAssistente");
-
-  // 2. O SEGREDO DE OURO (Anti-Brownout)
-  // Reduz a potência de transmissão para não desarmar a porta USB do PC
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-
-  // 3. Impede o roteador de "adormecer" a placa
-  WiFi.setSleep(false);
-
-  // 4. Trava direto no MAC físico da antena da tua casa e no Canal 1
-  const uint8_t bssidVivo[] = {0x98, 0x7E, 0xCA, 0x91, 0x65, 0x6F};
-  WiFi.begin(WIFI_SSID, WIFI_PASS, 1, bssidVivo);
+  // Conexão limpa padrão para o roteador do celular
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   uint32_t tStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
@@ -102,7 +85,7 @@ void wifiEnsure() {
     }
   }
 
-  Serial.print("\n[WiFi] VIVO FIBRA DOMINADA COM SUCESSO! IP: ");
+  Serial.print("\n[WiFi] CONECTADO AO CELULAR COM SUCESSO! IP: ");
   Serial.println(WiFi.localIP());
   Serial.println("==================================================");
   
