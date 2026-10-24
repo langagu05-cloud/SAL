@@ -40,7 +40,7 @@ uint8_t* audioBuf = NULL;
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE: CONEXÃO COM A VIVO FIBRA
+// REDE: CONEXÃO COM A VIVO FIBRA (COM FORÇAGEM DE PROTOCOLO 2.4GHz)
 // ============================================================================
 void syncTime() {
   configTime(-10800, 0, "pool.ntp.org", "time.nist.gov");
@@ -68,18 +68,21 @@ void wifiEnsure() {
   
   WiFi.persistent(false);
   WiFi.disconnect(true);
-  delay(1500);
+  delay(1000);
   
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   
+  // Força o protocolo 11b/g/n para ignorar interferências de 5GHz do router
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   uint32_t tStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    if (millis() - tStart > 30000) {
+    if (millis() - tStart > 35000) {
       Serial.println("\n[ERRO CRITICO] Timeout no Wi-Fi. A reiniciar ESP32...");
       ESP.restart();
     }
