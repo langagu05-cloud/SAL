@@ -5,7 +5,7 @@
 #include <driver/i2s.h>
 #include "mbedtls/base64.h"
 #include <time.h>
-#include <esp_wifi.h> // Necessário para configurações avançadas do rádio
+#include <esp_wifi.h> // Biblioteca central da Espressif para hackear o rádio
 
 // ============================================================================
 // CONFIGURAÇÃO DE REDE E API
@@ -40,15 +40,11 @@ uint8_t* audioBuf = NULL;
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE SUPER AVANÇADA (BSSID LOCK + NO SLEEP)
+// REDE COM SOLUÇÃO DEFINITIVA PARA VIVO FIBRA
 // ============================================================================
-// Endereço físico (MAC) EXATO da tua rede VIVOFIBRA-6561 (Canal 1) pego no teu CMD
-const uint8_t bssidVivo[] = {0x98, 0x7E, 0xCA, 0x91, 0x65, 0x6F};
-
-// Rastreador de erros do roteador (Mostra o motivo exato se a Vivo derrubar a conexão)
 void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-        Serial.printf("\n[ALERTA VIVO] O Roteador cortou a conexao! Motivo (Reason Code): %d\n", info.wifi_sta_disconnected.reason);
+        Serial.printf("\n[ALERTA VIVO] A Vivo cortou a ligacao! Reason Code: %d\n", info.wifi_sta_disconnected.reason);
     }
 }
 
@@ -73,37 +69,38 @@ void wifiEnsure() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.println("\n==================================================");
-  Serial.print("[WiFi] Iniciando MODO SNIPER (BSSID Lock) para: ");
+  Serial.print("[WiFi] HACK VIVO FIBRA ATIVADO para: ");
   Serial.println(WIFI_SSID);
   
   WiFi.disconnect(true);
   delay(1000);
   
-  // 1. Registra o monitor de eventos do Wi-Fi
   WiFi.onEvent(WiFiEvent);
-  
   WiFi.mode(WIFI_STA);
 
-  // 2. Desativa economia de energia (Impede o roteador da Vivo de desativar o ESP32)
-  WiFi.setSleep(false);
-  
-  // 3. Potência do rádio no Talo (Máximo permitido)
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  // 1. NOMEAR O DISPOSITIVO (Fura o bloqueio do DHCP da Vivo)
+  WiFi.setHostname("Salvio-Assistente");
 
-  // 4. CONEXÃO DIRETA HARDWARE-TO-HARDWARE: Ignora scans e ataca direto o MAC do roteador no Canal 1
-  WiFi.begin(WIFI_SSID, WIFI_PASS, 1, bssidVivo);
+  // 2. FORÇAR MODO LEGACY (802.11 b/g) - A SOLUÇÃO DE OURO!
+  // Desliga o Wi-Fi N (802.11n) que entra em conflito com os modems Askey/MitraStar
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G);
+
+  // 3. Força a segurança mínima para WPA2
+  WiFi.setMinSecurity(WIFI_AUTH_WPA2_PSK);
+
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
   uint32_t tStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
     if (millis() - tStart > 20000) {
-      Serial.println("\n[ERRO CRITICO] Timeout. Reiniciando o tanque...");
+      Serial.println("\n[ERRO CRITICO] Timeout. Reiniciando...");
       ESP.restart();
     }
   }
 
-  Serial.print("\n[WiFi] CONECTADO COMO UM CHEFE! IP: ");
+  Serial.print("\n[WiFi] VIVO FIBRA DOMINADA COM SUCESSO! IP: ");
   Serial.println(WiFi.localIP());
   Serial.println("==================================================");
   
@@ -111,7 +108,7 @@ void wifiEnsure() {
 }
 
 // ============================================================================
-// MICROFONE (INMP441)
+// MICROFONE (INMP441) E RESTO DO CÓDIGO INTACTO
 // ============================================================================
 void setupMic() {
   i2s_config_t cfg = {};
