@@ -12,7 +12,7 @@
 const char* WIFI_SSID = "VIVOFIBRA-6561";
 const char* WIFI_PASS = "ppUb6qmc9Q";
 
-// ATENÇÃO: Insere aqui a tua chave da API do Gemini de forma segura quando fores compilar
+// ATENÇÃO: Insere aqui a tua chave da API do Gemini real para o ESP32 funcionar
 const char* GEMINI_API_KEY   = "SUA_CHAVE_API_AQUI"; 
 const char* GEMINI_HOST      = "generativelanguage.googleapis.com";
 const char* GEMINI_MODEL     = "gemini-2.5-flash";
@@ -68,6 +68,8 @@ void wifiEnsure() {
   Serial.print("\n[WiFi] Conectando a ");
   Serial.println(WIFI_SSID);
 
+  // Limpeza profunda de cache Wi-Fi para forçar conexão limpa
+  WiFi.persistent(false); 
   WiFi.disconnect(true);
   delay(1000);
   
@@ -78,8 +80,9 @@ void wifiEnsure() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    if (millis() - tStart > 20000) {
-      Serial.println("\n[ERRO] Falha crítica no Wi-Fi. Reiniciando o ESP32...");
+    // Aumentado para 30 segundos para dar margem ao router
+    if (millis() - tStart > 30000) {
+      Serial.println("\n[ERRO] Falha ao conectar. Reiniciando o ESP32...");
       ESP.restart();
     }
   }
