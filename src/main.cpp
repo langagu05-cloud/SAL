@@ -66,13 +66,12 @@ void wifiEnsure() {
   Serial.print("[WiFi] A CONECTAR AO HOTSPOT: ");
   Serial.println(WIFI_SSID);
   
-  // Desliga completamente e limpa qualquer estado anterior do rádio
   WiFi.persistent(false);
   WiFi.disconnect(true);
   delay(1500);
   
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false); // Desativa poupança de energia para manter o rádio firme
+  WiFi.setSleep(false);
   
   WiFi.begin(WIFI_SSID, WIFI_PASS);
 
@@ -80,7 +79,6 @@ void wifiEnsure() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
-    // Margem de 30 segundos para dar folga ao telemóvel responder
     if (millis() - tStart > 30000) {
       Serial.println("\n[ERRO CRITICO] Timeout no Wi-Fi. A reiniciar ESP32...");
       ESP.restart();
