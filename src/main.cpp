@@ -5,7 +5,7 @@
 #include <driver/i2s.h>
 #include "mbedtls/base64.h"
 #include <time.h>
-#include <esp_wifi.h> // Biblioteca central da Espressif para hackear o rádio
+#include <esp_wifi.h> 
 
 // ============================================================================
 // CONFIGURAÇÃO DE REDE E API
@@ -40,7 +40,7 @@ uint8_t* audioBuf = NULL;
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE COM SOLUÇÃO DEFINITIVA PARA VIVO FIBRA
+// REDE: HACK VIVO FIBRA + ANTI-BROWNOUT
 // ============================================================================
 void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
@@ -69,7 +69,7 @@ void wifiEnsure() {
   if (WiFi.status() == WL_CONNECTED) return;
 
   Serial.println("\n==================================================");
-  Serial.print("[WiFi] HACK VIVO FIBRA ATIVADO para: ");
+  Serial.print("[WiFi] APLICANDO ANTI-BROWNOUT VIVO FIBRA: ");
   Serial.println(WIFI_SSID);
   
   WiFi.disconnect(true);
@@ -77,18 +77,20 @@ void wifiEnsure() {
   
   WiFi.onEvent(WiFiEvent);
   WiFi.mode(WIFI_STA);
+  
+  // 1. Nomeia o dispositivo para furar o DHCP
+  WiFi.setHostname("SalvioAssistente");
 
-  // 1. NOMEAR O DISPOSITIVO (Fura o bloqueio do DHCP da Vivo)
-  WiFi.setHostname("Salvio-Assistente");
+  // 2. O SEGREDO DE OURO (Anti-Brownout)
+  // Reduz a potência de transmissão para não desarmar a porta USB do PC
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
 
-  // 2. FORÇAR MODO LEGACY (802.11 b/g) - A SOLUÇÃO DE OURO!
-  // Desliga o Wi-Fi N (802.11n) que entra em conflito com os modems Askey/MitraStar
-  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G);
+  // 3. Impede o roteador de "adormecer" a placa
+  WiFi.setSleep(false);
 
-  // 3. Força a segurança mínima para WPA2
-  WiFi.setMinSecurity(WIFI_AUTH_WPA2_PSK);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  // 4. Trava direto no MAC físico da antena da tua casa e no Canal 1
+  const uint8_t bssidVivo[] = {0x98, 0x7E, 0xCA, 0x91, 0x65, 0x6F};
+  WiFi.begin(WIFI_SSID, WIFI_PASS, 1, bssidVivo);
 
   uint32_t tStart = millis();
   while (WiFi.status() != WL_CONNECTED) {
@@ -108,7 +110,7 @@ void wifiEnsure() {
 }
 
 // ============================================================================
-// MICROFONE (INMP441) E RESTO DO CÓDIGO INTACTO
+// MICROFONE (INMP441)
 // ============================================================================
 void setupMic() {
   i2s_config_t cfg = {};
