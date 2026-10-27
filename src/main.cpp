@@ -1,22 +1,22 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <ArduinoJson.h>
 #include <driver/i2s.h>
-#include "mbedtls/base64.h"
-#include <time.h>
-#include <esp_wifi.h> 
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
 // ============================================================================
-// CONFIGURAÇÃO DE REDE E API
+// CONFIGURAÇÃO BLUETOOTH (BLE)
 // ============================================================================
-const char* WIFI_SSID = "VIVOFIBRA6561";
-const char* WIFI_PASS = "ppUb6qmc9Q";
+#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_AUDIO_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define CHARACTERISTIC_TEXT_UUID  "8b365922-358b-42ea-92b0-8f61536b1d4c"
 
-// Chave da API do Gemini inserida diretamente para testes locais
-const char* GEMINI_API_KEY   = "AQ.Ab8RN6IHnIPnvblf0lPSnEJBgpH8C9wOsELarpF_niyO060a6g"; 
-const char* GEMINI_HOST      = "generativelanguage.googleapis.com";
-const char* GEMINI_MODEL     = "gemini-2.5-flash";
+BLEServer* pServer = NULL;
+BLECharacteristic* pAudioCharacteristic = NULL;
+BLECharacteristic* pTextCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 
 // --- Pinos (ESP32 WROOM + INMP441) ---
 #define MIC_PORT  I2S_NUM_0
@@ -31,69 +31,41 @@ const char* GEMINI_MODEL     = "gemini-2.5-flash";
 #define ACTUAL_REC_SEC    3     
 #define WAV_HEADER_SIZE   44
 #define PCM_BYTES         (MIC_SAMPLE_RATE * ACTUAL_REC_SEC * 2)
-#define AUDIO_BUF_SIZE    (WAV_HEADER_SIZE + PCM_BYTES)
+#define AUDIO_BUF_SIZE    (WAV_HEADER_SIZE + PCM_BYTES) // Exatamente 48044 bytes
 #define MIC_GAIN_SHIFT    12
-#define VAD_THRESHOLD     1200  
+#define VAD_THRESHOLD     300   // Alta sensibilidade para captar a fala facilmente
 
 uint8_t* audioBuf = NULL;
 
 static inline size_t minz(size_t a, size_t b) { return a < b ? a : b; }
 
 // ============================================================================
-// REDE: CONEXÃO COM A VIVO FIBRA (COM FORÇAGEM DE PROTOCOLO 2.4GHz)
+// CALLBACKS DO BLUETOOTH
 // ============================================================================
-void syncTime() {
-  configTime(-10800, 0, "pool.ntp.org", "time.nist.gov");
-  Serial.print("[INFO] Sincronizando relogio NTP...");
-  struct tm timeinfo;
-  int tentativas = 0;
-  while (!getLocalTime(&timeinfo) && tentativas < 10) {
-    Serial.print(".");
-    delay(500);
-    tentativas++;
+class MyServerCallbacks: public BLEServerCallbacks {
+  void onConnect(BLEServer* pServer) {
+    deviceConnected = true;
+    Serial.println("\n[BLE] Telemóvel/PC conectado ao Sálvio com sucesso!");
+    digitalWrite(PIN_LED, HIGH);
   }
-  if (tentativas < 10) {
-    Serial.println("\n[INFO] Relogio sincronizado com sucesso!");
-  } else {
-    Serial.println("\n[AVISO] Falha ao sincronizar hora, mas continuando...");
+
+  void onDisconnect(BLEServer* pServer) {
+    deviceConnected = false;
+    Serial.println("\n[BLE] Dispositivo desconectado. A reiniciar advertising...");
+    digitalWrite(PIN_LED, LOW);
   }
-}
+};
 
-void wifiEnsure() {
-  if (WiFi.status() == WL_CONNECTED) return;
-
-  Serial.println("\n==================================================");
-  Serial.print("[WiFi] A CONECTAR A VIVO: ");
-  Serial.println(WIFI_SSID);
-  
-  WiFi.persistent(false);
-  WiFi.disconnect(true);
-  delay(1000);
-  
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  
-  // Força o protocolo 11b/g/n para ignorar interferências de 5GHz do router
-  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-  uint32_t tStart = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-    if (millis() - tStart > 35000) {
-      Serial.println("\n[ERRO CRITICO] Timeout no Wi-Fi. A reiniciar ESP32...");
-      ESP.restart();
+class MyTextCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+    std::string rxValue = pCharacteristic->getValue();
+    if (rxValue.length() > 0) {
+      Serial.println("==================================================");
+      Serial.printf("👴💬 SÁLVIO DIZ: \"%s\"\n", rxValue.c_str());
+      Serial.println("==================================================");
     }
   }
-
-  Serial.print("\n[WiFi] CONECTADO COM SUCESSO! IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.println("==================================================");
-  
-  syncTime();
-}
+};
 
 // ============================================================================
 // MICROFONE (INMP441)
@@ -160,18 +132,17 @@ bool listenAndRecord() {
 
   micFlush(200);
   size_t pos = 0; int loud = 0;
-  uint32_t lastWifiCheck = millis();
 
   while (loud < 3) {
-    if (millis() - lastWifiCheck > 5000) { lastWifiCheck = millis(); wifiEnsure(); }
+    if (!deviceConnected) return false;
     size_t n = micRead(pcm + pos, BLOCK);
     if (n == 0) continue;
     uint32_t level = meanAbs(pcm + pos, n);
     if (level > VAD_THRESHOLD) { loud++; } else { loud = 0; }
   }
 
-  digitalWrite(PIN_LED, HIGH);
-  Serial.println("\n[MIC] Voz detectada! Ouvindo...");
+  Serial.println("\n[MIC] Voz detetada! A gravar áudio...");
+  digitalWrite(PIN_LED, LOW); // Pisca LED para indicar gravação
   
   pos = 0;
   while (pos < totalSamples) {
@@ -181,7 +152,7 @@ bool listenAndRecord() {
   }
   if (pos < totalSamples) memset(pcm + pos, 0, (totalSamples - pos) * 2);
 
-  digitalWrite(PIN_LED, LOW);
+  digitalWrite(PIN_LED, HIGH); // Volta a acender fixo quando termina
   return true;
 }
 
@@ -200,112 +171,12 @@ void buildWavHeader(uint8_t* h, uint32_t pcmBytes, uint32_t rate) {
 }
 
 // ============================================================================
-// GEMINI
-// ============================================================================
-String getSystemPrompt() {
-  struct tm timeinfo;
-  String dataHora = "Desconhecida";
-  if (getLocalTime(&timeinfo)) {
-    char timeStringBuff[50];
-    strftime(timeStringBuff, sizeof(timeStringBuff), "%d/%m/%Y %H:%M", &timeinfo);
-    dataHora = String(timeStringBuff);
-  }
-
-  String prompt = "És o Sálvio, um assistente de voz inteligente, carinhoso, paciente e prestativo, feito para conversar com um senhor de idade. "
-                  "Moras em São Bento do Sul, SC, Brasil. A data e hora atual é: " + dataHora + ". "
-                  "Podes responder perguntas gerais, dar receitas culinárias simples, contar piadas limpas, falar sobre o clima ou conversar amigavelmente. "
-                  "Responde obrigatoriamente em formato JSON estruturado contendo apenas o campo 'fala'. "
-                  "O texto do campo 'fala' deve ser claro, com frases curtas e afetuosas (como um neto atencioso). "
-                  "Se o áudio for apenas ruído ou chiado, devolve o campo 'fala' vazio.";
-  return prompt;
-}
-
-String jsonEscape(const String& in) {
-  String out; out.reserve(in.length() + 16);
-  for (size_t i = 0; i < in.length(); i++) {
-    char c = in[i];
-    if (c == '"') out += "\\\""; else if (c == '\\') out += "\\\\";
-    else if (c == '\n') out += "\\n"; else if (c == '\r') out += "\\r";
-    else out += c;
-  }
-  return out;
-}
-
-bool askGemini(String& fala) {
-  fala = "";
-  buildWavHeader(audioBuf, PCM_BYTES, MIC_SAMPLE_RATE);
-
-  size_t b64Len = ((AUDIO_BUF_SIZE + 2) / 3) * 4;
-  char* b64Buffer = (char*)malloc(b64Len + 1);
-  if (!b64Buffer) return false;
-  
-  size_t outLen = 0;
-  mbedtls_base64_encode((unsigned char*)b64Buffer, b64Len + 1, &outLen, audioBuf, AUDIO_BUF_SIZE);
-  b64Buffer[outLen] = '\0';
-
-  String promptDinamico = getSystemPrompt();
-  
-  String payload = "{\"systemInstruction\":{\"parts\":[{\"text\":\"" + jsonEscape(promptDinamico) + "\"}]},";
-  payload += "\"tools\": [{\"googleSearch\": {}}], "; 
-  payload += "\"generationConfig\": {\"responseMimeType\": \"application/json\", \"responseSchema\": { \"type\": \"OBJECT\", \"properties\": { \"fala\": {\"type\": \"STRING\"} } }},";
-  payload += "\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Ouve o que o vovo disse:\"},{\"inlineData\":{\"mimeType\":\"audio/wav\",\"data\":\"" + String(b64Buffer) + "\"}}]}]}";
-  free(b64Buffer);
-
-  Serial.println("[PROCESSANDO] Consultando o Sálvio na nuvem...");
-  WiFiClientSecure client;
-  client.setInsecure();
-  
-  if (!client.connect(GEMINI_HOST, 443)) {
-    Serial.println("[ERRO] Falha na conexao HTTPS.");
-    return false;
-  }
-
-  String path = String("/v1beta/models/") + GEMINI_MODEL + ":generateContent?key=" + String(GEMINI_API_KEY);
-  
-  client.printf("POST %s HTTP/1.1\r\n", path.c_str());
-  client.printf("Host: %s\r\n", GEMINI_HOST);
-  client.println("Content-Type: application/json");
-  client.printf("Content-Length: %u\r\n", payload.length());
-  client.println("Connection: close\r\n");
-  
-  const int chunkSize = 1024;
-  for (size_t i = 0; i < payload.length(); i += chunkSize) {
-    client.print(payload.substring(i, i + chunkSize));
-  }
-
-  while (client.connected() && !client.available()) delay(10);
-  
-  String response = "";
-  bool headersPassed = false;
-  while (client.available() && client.connected()) {
-    String line = client.readStringUntil('\n');
-    if (line == "\r") headersPassed = true;
-    else if (headersPassed) response += line;
-  }
-  client.stop();
-
-  if (response.indexOf("candidates") == -1) return false;
-
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, response);
-  if (err) return false;
-
-  const char* text = doc["candidates"][0]["content"]["parts"][0]["text"] | "";
-  JsonDocument inner;
-  if (!deserializeJson(inner, text)) {
-    fala = String((const char*)(inner["fala"] | ""));
-    return true;
-  }
-  return false;
-}
-
-// ============================================================================
 // SETUP E LOOP
 // ============================================================================
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n=== SÁLVIO - ASSISTENTE DE VOZ (ESP32 + INMP441) ===");
+  Serial.println("\n=== SÁLVIO - MODO BLE ROBUSTO ===");
 
   audioBuf = (uint8_t*)malloc(AUDIO_BUF_SIZE);
   if (!audioBuf) { Serial.println("[ERRO] Memória RAM insuficiente!"); return; }
@@ -314,22 +185,73 @@ void setup() {
   digitalWrite(PIN_LED, LOW);
 
   setupMic();
-  wifiEnsure();
-  Serial.println("--- Sálvio pronto e escutando! ---");
+
+  // Inicializa BLE
+  BLEDevice::init("Salvio-Assistente");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // CARACTERÍSTICA DE ÁUDIO COM O DESCRITOR 2902 PARA NOTIFICAÇÕES (Corrigido!)
+  pAudioCharacteristic = pService->createCharacteristic(
+                         CHARACTERISTIC_AUDIO_UUID,
+                         BLECharacteristic::PROPERTY_READ |
+                         BLECharacteristic::PROPERTY_NOTIFY
+                       );
+  pAudioCharacteristic->addDescriptor(new BLE2902());
+
+  // CARACTERÍSTICA DE TEXTO PARA RECEBER A RESPOSTA (Corrigido!)
+  pTextCharacteristic = pService->createCharacteristic(
+                        CHARACTERISTIC_TEXT_UUID,
+                        BLECharacteristic::PROPERTY_WRITE
+                      );
+  pTextCharacteristic->setCallbacks(new MyTextCallbacks());
+
+  pService->start();
+  
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06); 
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  Serial.println("--- Sálvio BLE pronto! À espera de conexão... ---");
 }
 
 void loop() {
-  wifiEnsure();
-  if (listenAndRecord()) {
-    String fala;
-    if (askGemini(fala)) {
-      if (fala.length() > 0) {
-        Serial.println("==================================================");
-        Serial.printf("👴💬 SALVIO DIZ: \"%s\"\n", fala.c_str());
-        Serial.println("==================================================");
+  // Gestão de reconexão BLE
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500); 
+    pServer->startAdvertising(); 
+    oldDeviceConnected = deviceConnected;
+  }
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
+  }
+
+  if (deviceConnected) {
+    if (listenAndRecord()) {
+      buildWavHeader(audioBuf, PCM_BYTES, MIC_SAMPLE_RATE);
+      Serial.println("[BLE] Áudio pronto. A transmitir pacotes via BLE...");
+      
+      size_t totalSize = AUDIO_BUF_SIZE;
+      size_t offset = 0;
+      const size_t chunkSize = 180; // Otimizado para estabilidade máxima no BLE do Windows
+
+      while (offset < totalSize) {
+        size_t len = minz(chunkSize, totalSize - offset);
+        pAudioCharacteristic->setValue(audioBuf + offset, len);
+        pAudioCharacteristic->notify();
+        offset += len;
+        delay(20); // Pausa para garantir que o buffer BLE processa sem erros
       }
-    } else {
-      Serial.println("[AVISO] Nao foi possivel processar a fala.");
+      
+      Serial.println("[BLE] Transmissão de áudio concluída! À espera do retorno da IA...");
+      delay(2000); 
     }
+  } else {
+    delay(500);
   }
 }
